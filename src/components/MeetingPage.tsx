@@ -909,7 +909,9 @@ export default function MeetingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState(0);
-  const [activeDay, setActiveDay] = useState<'today' | 'yesterday' | 'friday' | 'weekend'>('yesterday');
+  const [activeDay, setActiveDay] = useState<'today' | 'yesterday' | 'friday' | 'weekend'>(
+    isMonday() ? 'weekend' : 'yesterday'
+  );
 
   const fetchData = useCallback(async () => {
     try {

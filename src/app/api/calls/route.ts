@@ -11,7 +11,12 @@ export const dynamic = 'force-dynamic';
  */
 async function fetchRecordingSids(date: Date, auth: string): Promise<Set<string>> {
   const sid = process.env.TWILIO_ACCOUNT_SID!;
-  const ds = date.toISOString().slice(0, 10);
+  // Use the local (MST/MDT) date string to match the same day used by fetchCallsForDate,
+  // rather than toISOString() which returns UTC and could be a different calendar day.
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const ds = `${y}-${m}-${d}`;
   const sids = new Set<string>();
 
   let url: string | null =

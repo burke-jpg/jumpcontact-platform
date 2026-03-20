@@ -38,10 +38,14 @@ interface CallsResponse { calls: RawCall[]; agents: AgentSummary[]; pulledAt: st
 
 // ── CSV Export ──────────────────────────────────────────────────────────────
 
+function escapeCSV(value: string): string {
+  return value.replace(/"/g, '""');
+}
+
 function downloadCSV(calls: RawCall[], filename: string) {
   const header = 'Time,Agent,Client,Phone,Duration (sec),Direction\n';
   const rows = calls.map(c =>
-    `"${new Date(c.time).toLocaleString('en-US', { timeZone: 'America/Edmonton' })}","${c.agent}","${c.account || ''}","${formatPhone(c.phone)}",${c.duration},"${c.direction}"`
+    `"${escapeCSV(new Date(c.time).toLocaleString('en-US', { timeZone: 'America/Edmonton' }))}","${escapeCSV(c.agent)}","${escapeCSV(c.account || '')}","${escapeCSV(formatPhone(c.phone))}",${c.duration},"${c.direction}"`
   ).join('\n');
   const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);

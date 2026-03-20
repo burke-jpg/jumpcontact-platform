@@ -90,6 +90,19 @@ function getSheets() {
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/** Return the UTC offset string for America/Edmonton on a given date (handles DST). */
+function edmontonUtcOffset(date: Date): string {
+  const jan = new Date(date.getFullYear(), 0, 1);
+  const jul = new Date(date.getFullYear(), 6, 1);
+  const stdOffset = Math.max(jan.getTimezoneOffset(), jul.getTimezoneOffset());
+  // Format the date as if it were in Edmonton and check if DST is active
+  const fmt = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Edmonton', timeZoneName: 'short' });
+  const parts = fmt.formatToParts(date);
+  const tzName = parts.find(p => p.type === 'timeZoneName')?.value || '';
+  // MDT = Mountain Daylight Time (-06:00), MST = Mountain Standard Time (-07:00)
+  return tzName === 'MDT' ? '-06:00' : '-07:00';
+}
+
 function parseConvTimestamp(ts: string): Date | null {
   if (!ts) return null;
   const parts = ts.trim().split(' ');
@@ -257,6 +270,7 @@ export async function getMissedCalls(
 ): Promise<MissedData> {
   const mm = String(date.getMonth() + 1).padStart(2, '0');
   const dd = String(date.getDate()).padStart(2, '0');
+  const yyyy = String(date.getFullYear());
   const dateSlash = `${mm}/${dd}`;
 
   const res = await sheets.spreadsheets.values.get({
@@ -264,7 +278,18 @@ export async function getMissedCalls(
     range: `${MISSED_CALLS_TAB}!A:H`,
   });
   const rows = (res.data.values || []).slice(1);
-  const dateRows = rows.filter(row => (row[0] || '').trim().startsWith(dateSlash));
+  const dateRows = rows.filter(row => {
+    const cell = (row[0] || '').trim();
+    // Match MM/DD and also verify the year if present (e.g. "03/20/2026 ...")
+    if (!cell.startsWith(dateSlash)) return false;
+    // After MM/DD there should be '/' followed by the year, or a space/end-of-string
+    const rest = cell.slice(dateSlash.length);
+    if (rest.startsWith('/')) {
+      const yearPart = rest.slice(1).split(/[\s,]/)[0];
+      return yearPart === yyyy;
+    }
+    return true; // no year in the cell — accept as match
+  });
 
   let jcTotal = 0;
   let ibrahimCount = 0;
@@ -379,10 +404,11 @@ export interface TwilioCall { sid: string; to: string; from: string; duration: s
 
 export async function fetchCallsForDate(date: Date, auth: string): Promise<TwilioCall[]> {
   const sid = process.env.TWILIO_ACCOUNT_SID!;
-  // Use ISO timestamps with MST offset so Twilio queries the correct MST day
-  // (plain date strings are interpreted as UTC midnight, which is 7 hours off)
-  const ds  = `${dateStr(date)}T00:00:00-07:00`;
-  const nds = `${nextDayStr(date)}T00:00:00-07:00`;
+  // Use ISO timestamps with the correct Edmonton offset (MST -07:00 or MDT -06:00)
+  // so Twilio queries the correct local day.
+  const offset = edmontonUtcOffset(date);
+  const ds  = `${dateStr(date)}T00:00:00${offset}`;
+  const nds = `${nextDayStr(date)}T00:00:00${offset}`;
   const calls: TwilioCall[] = [];
   let url: string | null =
     `https://api.twilio.com/2010-04-01/Accounts/${sid}/Calls.json?StartTime>=${ds}&StartTime<${nds}&PageSize=1000`;
@@ -527,12 +553,12 @@ export async function getDashboardData(): Promise<DashboardData> {
 
   // Determine which dates we need
   const datesToFetch = [today, yesterday];
-  let friday: Date | undefined, saturday: Date | undefined, sunday: Date | undefined;
+  let friday: Date | undefined, saturday: Date | undefined;
   if (monday) {
     friday   = new Date(today); friday.setDate(friday.getDate() - 3);
     saturday = new Date(today); saturday.setDate(saturday.getDate() - 2);
-    sunday   = new Date(today); sunday.setDate(sunday.getDate() - 1);
-    datesToFetch.push(friday, saturday, sunday);
+    // sunday is the same as yesterday on Monday — no need to add it again
+    datesToFetch.push(friday, saturday);
   }
 
   // Fetch all conversions in one Sheets call
@@ -564,25 +590,22 @@ export async function getDashboardData(): Promise<DashboardData> {
     recentCalls,
   };
 
-  // Monday: build weekend data
-  if (monday && friday && saturday && sunday) {
+  // Monday: build weekend data (sunday = yesterday, so reuse yesterdayResult)
+  if (monday && friday && saturday) {
     const friKey = dateStr(friday);
     const satKey = dateStr(saturday);
-    const sunKey = dateStr(sunday);
 
-    const [friResult, satResult, sunResult] = await Promise.all([
+    const [friResult, satResult] = await Promise.all([
       buildPeriodData(friday, sheets,
         convResult.periods[friKey] || { total: 0, byAgent: [], byAccount: [], hourly: new Array(24).fill(0) }, auth),
       buildPeriodData(saturday, sheets,
         convResult.periods[satKey] || { total: 0, byAgent: [], byAccount: [], hourly: new Array(24).fill(0) }, auth),
-      buildPeriodData(sunday, sheets,
-        convResult.periods[sunKey] || { total: 0, byAgent: [], byAccount: [], hourly: new Array(24).fill(0) }, auth),
     ]);
 
     result.weekend = {
       friday:   friResult.period,
       saturday: satResult.period,
-      sunday:   sunResult.period,
+      sunday:   yesterdayResult.period,
     };
   }
 
