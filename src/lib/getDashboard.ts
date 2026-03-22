@@ -77,12 +77,24 @@ export interface DashboardData {
 
 const WORKSPACE_SID = process.env.TWILIO_WORKSPACE_SID || '';
 
+function getGoogleCredentials(): { client_email: string; private_key: string } {
+  // Support GOOGLE_CREDENTIALS as a single JSON blob, or separate env vars
+  if (process.env.GOOGLE_CREDENTIALS) {
+    const creds = JSON.parse(process.env.GOOGLE_CREDENTIALS);
+    return {
+      client_email: creds.client_email,
+      private_key: creds.private_key.replace(/\\n/g, '\n'),
+    };
+  }
+  return {
+    client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL || '',
+    private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+  };
+}
+
 function getSheets() {
   const auth = new google.auth.GoogleAuth({
-    credentials: {
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      private_key: (process.env.GOOGLE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
-    },
+    credentials: getGoogleCredentials(),
     scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
   });
   return google.sheets({ version: 'v4', auth });
